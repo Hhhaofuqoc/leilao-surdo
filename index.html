@@ -311,6 +311,43 @@ function nextRound(){
  // tilt 3d aleatório
  document.getElementById('stage').style.transform=`rotateX(${6+Math.random()*6}deg) rotateY(${(Math.random()-0.5)*6}deg)`;
  update();
+ askRobotAI(item); // OPCODE-777 pensa no que ELE ouviu (GitHub Actions)
+}
+// ===== OPCODE-777: robô de verdade via bridge (server.py -> GitHub Actions) =====
+let ai={status:'idle', data:null, error:null, rid:null, round:-1};
+async function askRobotAI(item){
+ const myRound=idx;
+ ai={status:'sending', data:null, error:null, rid:null, round:myRound};
+ try{
+  const r=await fetch('/api/leiloar',{method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({tema:theme,item_real:item.real,player_ouviu:item.pHeard,seu_saldo:coinsR,rodada:myRound+1})});
+  const j=await r.json();
+  if(!j.rid) throw new Error(j.error||'dispatch falhou');
+  ai.rid=j.rid; ai.status='dispatched';
+  const t0=Date.now();
+  while(Date.now()-t0<240000 && ai.round===myRound){
+   await new Promise(s=>setTimeout(s,3000));
+   const p=await (await fetch('/api/leiloar/'+ai.rid)).json();
+   if(ai.round!==myRound) return; // rodada mudou, descarta
+   ai.status=p.status;
+   if(p.status==='done' && p.data && p.data.ouvi){
+    ai.data=p.data; ai.status='done';
+    log('🤖 <i>OPCODE-777 parou de se rabiscar o fone: já sabe o que "ouviu".</i>');
+    return;
+   }
+   if(p.status==='error'){ ai.error=p.error; ai.status='error'; return; }
+  }
+  ai.error='timeout'; ai.status='error';
+ }catch(e){ ai.error=String(e); ai.status='error'; }
+}
+function robotHears(item){
+ // resposta da IA se chegou; senão, robô local tosco
+ if(ai.status==='done' && ai.data){
+  const l=parseInt(ai.data.lance);
+  return {heard:ai.data.ouvi, bid:(coinsR>0?Math.max(1,Math.min(coinsR,isNaN(l)?robotBid(item):l)):0),
+          taunt:ai.data.taunt, src:'ia'};
+ }
+ return {heard:item.rHeard, bid:robotBid(item), taunt:null, src:'local'};
 }
 function robotBid(item){
  // robô avalia o que ELE ouviu (errado) + blefe - escala R$20
@@ -337,14 +374,16 @@ document.getElementById('btnListen').onclick=()=>{
 document.getElementById('btnBid').onclick=()=>{
  const item=deck[idx]; if(!item) return;
  let pBid=Math.min(coinsP, parseInt(document.getElementById('bid').value));
- let rBid=robotBid(item);
+ const rh=robotHears(item);
+ let rBid=rh.bid;
  let winner = pBid>=rBid ? 'P':'R';
  // desempate sem grana = perde
  if(winner==='P' && pBid===0 && rBid===0) winner = Math.random()<.5?'P':'R';
  if(winner==='P'){ coinsP-=pBid; scoreP+=item.val; document.getElementById('colP').innerHTML+=`<span class="pill ${item.val>=7?'good':'bad'}">${item.real} (${item.val})</span>`; }
  else { coinsR-=rBid; scoreR+=item.val; document.getElementById('colR').innerHTML+=`<span class="pill ${item.val>=7?'good':'bad'}">${item.real} (${item.val})</span>`; }
- log(`💸 Você: <b>R$${pBid}</b> | Robô: <b>R$${rBid}</b> → <b>${winner==='P'?'VOCÊ LEVOU':'ROBÔ LEVOU'}</b>`, winner==='R'?'robot-bubble':'');
- log(`🤖 Robô: "eu ouvi claramente <b>${item.rHeard}</b>, por isso paguei R$${rBid}. O quê? Tava errado?"`, 'robot-bubble');
+ log(`💸 Você: <b>R$${pBid}</b> | Robô: <b>R$${rBid}</b> → <b>${winner==='P'?'VOCÊ LEVOU':'ROBÔ LEVOU'}</b>${rh.src==='ia'?' <span style="opacity:.6">(OPCODE-777)</span>':''}`, winner==='R'?'robot-bubble':'');
+ if(rh.taunt) log(`🤖 OPCODE-777: "${rh.taunt}"`, 'robot-bubble');
+ log(`🤖 Robô: "eu ouvi claramente <b>${rh.heard}</b>, por isso paguei R$${rBid}. O quê? Tava errado?"`, 'robot-bubble');
  log(`🎁 <b>REAL ERA:</b> <span style="color:var(--neon-lime)">${item.real}</span> — ${item.desc} [poder ${item.val}/10]. Você ouviu "${item.pHeard}".`);
  idx++; setTimeout(nextRound, 400);
  update();
