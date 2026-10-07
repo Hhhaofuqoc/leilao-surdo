@@ -51,13 +51,28 @@ jobs:
           echo "free_exit=$?"
           cat free.txt
 
-      - name: Teste githubmodels via opencode (com log)
-        env:
-          GH_MODELS_KEY: ${{ secrets.GH_MODELS_KEY }}
+      - name: Variante A: free + --pure
         run: |
           set +e
-          timeout 60 opencode run -m githubmodels/openai/gpt-4o-mini \
-            --print-logs --log-level DEBUG \
-            'Responda somente {"ok":true}' > ghm.txt 2>&1
-          echo "ghm_exit=$?"
-          tail -40 ghm.txt
+          timeout 60 opencode run -m opencode/mimo-v2.6-flash-free --pure \
+            'Responda somente {"ok":true}' > varA.txt 2>&1
+          echo "varA_exit=$?"
+          cat varA.txt
+
+      - name: Variante B: free + --agent
+        run: |
+          set +e
+          timeout 60 opencode run -m opencode/mimo-v2.6-flash-free \
+            --agent leiloeiro-surdo \
+            'Responda somente {"ok":true}' > varB.txt 2>&1
+          echo "varB_exit=$?"
+          cat varB.txt
+
+      - name: Variante C: free + --agent + --pure
+        run: |
+          set +e
+          timeout 60 opencode run -m opencode/mimo-v2.6-flash-free \
+            --agent leiloeiro-surdo --pure \
+            'Responda somente {"ok":true}' > varC.txt 2>&1
+          echo "varC_exit=$?"
+          cat varC.txt
