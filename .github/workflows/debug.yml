@@ -51,7 +51,7 @@ jobs:
           echo "free_exit=$?"
           cat free.txt
 
-      - name: Variante A: free + --pure
+      - name: "Variante A - free + pure"
         run: |
           set +e
           timeout 60 opencode run -m opencode/mimo-v2.6-flash-free --pure \
@@ -59,7 +59,7 @@ jobs:
           echo "varA_exit=$?"
           cat varA.txt
 
-      - name: Variante B: free + --agent
+      - name: "Variante B - free + agent"
         run: |
           set +e
           timeout 60 opencode run -m opencode/mimo-v2.6-flash-free \
@@ -68,7 +68,7 @@ jobs:
           echo "varB_exit=$?"
           cat varB.txt
 
-      - name: Variante C: free + --agent + --pure
+      - name: "Variante C - free + agent + pure"
         run: |
           set +e
           timeout 60 opencode run -m opencode/mimo-v2.6-flash-free \
