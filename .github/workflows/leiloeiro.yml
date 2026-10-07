@@ -1,0 +1,67 @@
+name: leiloeiro-surdo
+
+on:
+  workflow_dispatch:
+    inputs:
+      rodada:
+        description: "Payload JSON do round (rid,tema,item_real,player_ouviu,seu_saldo,rodada)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  leiloar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar OpenCode
+        run: npm i -g opencode-ai@1.18.35
+
+      - name: Preparar prompt
+        env:
+          PAYLOAD: ${{ inputs.rodada }}
+        run: |
+          mkdir -p out
+          printf '%s' "$PAYLOAD" > out/prompt.txt
+          echo "RID=$(python3 -c 'import json,os;print(json.loads(os.environ["PAYLOAD"])["rid"])')" >> "$GITHUB_ENV"
+          echo "PROMPT:"; cat out/prompt.txt; echo
+
+      - name: Rodar agente leiloeiro-surdo (OpenCode)
+        env:
+          GH_MODELS_KEY: ${{ secrets.GH_MODELS_KEY }}
+        run: |
+          set +e
+          timeout 180 opencode run \
+            --agent leiloeiro-surdo \
+            -m githubmodels/openai/gpt-4o-mini \
+            --pure \
+            "$(cat out/prompt.txt)" > out/raw.txt 2> out/err.txt
+          echo "exit=$?"
+          echo "=== RAW ==="; cat out/raw.txt
+          echo "=== ERR ==="; tail -50 out/err.txt
+
+      - name: Extrair JSON
+        run: |
+          python3 scripts/extract.py out/raw.txt out/result.json || true
+          if [ ! -s out/result.json ]; then
+            echo '{"ouvi":"(AUDICAO TOTAL FALHOU)","lance":10,"taunt":"sem sinal, confia em mim","confianca":"baixa","fallback":true}' > out/result.json
+          fi
+          echo "RESULTADO:"; cat out/result.json
+
+      - name: Publicar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: resultado-${{ env.RID }}
+          path: out/result.json
+          retention-days: 1
+          if-no-files-found: error
