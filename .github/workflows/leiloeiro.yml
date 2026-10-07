@@ -39,11 +39,21 @@ jobs:
       - name: Rodar agente leiloeiro-surdo (OpenCode free tier)
         run: |
           set +e
+          # BUG: --agent derruba o free tier ("can only be used from within OpenCode").
+          # Contorna embutindo o system prompt do agent .opencode/agents/leiloeiro-surdo.md.
+          python3 - <<'EOF'
+          from pathlib import Path
+          md = Path('.opencode/agents/leiloeiro-surdo.md').read_text()
+          parts = md.split('---', 2)  # '', frontmatter, corpo
+          corpo = parts[2] if len(parts) > 2 else md
+          payload = Path('out/prompt.txt').read_text()
+          Path('out/full.txt').write_text(
+              corpo.strip() + "\n\nPAYLOAD DA RODADA:\n" + payload + "\n")
+          EOF
           timeout 120 opencode run \
-            --agent leiloeiro-surdo \
             -m opencode/mimo-v2.6-flash-free \
             --pure \
-            "$(cat out/prompt.txt)" > out/raw.txt 2> out/err.txt
+            "$(cat out/full.txt)" > out/raw.txt 2> out/err.txt
           echo "exit=$?"
           echo "=== RAW ==="; cat out/raw.txt
           echo "=== ERR ==="; tail -50 out/err.txt
