@@ -1,0 +1,63 @@
+name: debug-provider
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Curl GitHub Models (GITHUB_TOKEN nativo)
+        env:
+          T: ${{ github.token }}
+        run: |
+          echo "== nativo =="
+          curl -sS -m 30 -o ghm_body.txt -w 'HTTP=%{http_code} time=%{time_total}\n' \
+            -X POST https://models.github.ai/inference/chat/completions \
+            -H "Authorization: Bearer $T" \
+            -H "Content-Type: application/json" \
+            -d '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"say PONG"}],"max_tokens":10}'
+          head -c 400 ghm_body.txt; echo
+
+      - name: Curl GitHub Models (PAT secret)
+        env:
+          T: ${{ secrets.GH_MODELS_KEY }}
+        run: |
+          echo "== pat =="
+          curl -sS -m 30 -o ghm2.txt -w 'HTTP=%{http_code} time=%{time_total}\n' \
+            -X POST https://models.github.ai/inference/chat/completions \
+            -H "Authorization: Bearer $T" \
+            -H "Content-Type: application/json" \
+            -d '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"say PONG"}],"max_tokens":10}'
+          head -c 400 ghm2.txt; echo
+
+      - name: Instalar OpenCode
+        run: npm i -g opencode-ai@1.18.35
+
+      - name: Teste free tier (sem key nenhuma)
+        run: |
+          set +e
+          timeout 60 opencode run -m opencode/mimo-v2.6-flash-free \
+            'Responda somente {"ok":true}' > free.txt 2>&1
+          echo "free_exit=$?"
+          cat free.txt
+
+      - name: Teste githubmodels via opencode (com log)
+        env:
+          GH_MODELS_KEY: ${{ secrets.GH_MODELS_KEY }}
+        run: |
+          set +e
+          timeout 60 opencode run -m githubmodels/openai/gpt-4o-mini \
+            --print-logs --log-level DEBUG \
+            'Responda somente {"ok":true}' > ghm.txt 2>&1
+          echo "ghm_exit=$?"
+          tail -40 ghm.txt
