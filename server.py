@@ -65,21 +65,23 @@ OPENER = urllib.request.build_opener(StripAuthRedirect)
 STATE = {}   # rid -> dict(payload, run_id, done, data, error, ts)
 STATE_LOCK = threading.Lock()
 
-def find_run(payload_str):
-    j = gh(f"/repos/{OWNER}/{REPO}/actions/workflows/{WORKFLOW}/runs?event=workflow_dispatch&per_page=15")
-    for run in j.get("workflow_runs", []):
-        inputs = run.get("inputs") or {}
-        if inputs.get("rodada") == payload_str:
-            return run["id"]
-    return None
-
-def get_artifact_zip(run_id):
-    j = gh(f"/repos/{OWNER}/{REPO}/actions/runs/{run_id}/artifacts")
+def find_artifact(rid):
+    """A API de workflow_dispatch NAO devolve inputs (redigido por seguranca).
+    Correlaciono pelo nome do artifact que o workflow publica: resultado-<rid>.
+    Retorna (art_id, run_id) ou (None, None) se ainda nao existe.
+    O artifact so aparece quando o run termina com sucesso."""
+    j = gh(f"/repos/{OWNER}/{REPO}/actions/artifacts?name=resultado-{rid}&per_page=1")
     arts = j.get("artifacts", [])
     if not arts:
-        return None
-    art = arts[0]  # so existe um artifact por run
-    url = f"{API}/repos/{OWNER}/{REPO}/actions/artifacts/{art['id']}/zip"
+        return None, None
+    a = arts[0]
+    if a.get("expired"):
+        return None, None
+    run_id = (a.get("workflow_run") or {}).get("id")
+    return a["id"], run_id
+
+def get_artifact_zip_by_id(art_id):
+    url = f"{API}/repos/{OWNER}/{REPO}/actions/artifacts/{art_id}/zip"
     req = urllib.request.Request(url)
     req.add_header("Authorization", "Bearer " + TOKEN)
     req.add_header("Accept", "application/vnd.github+json")
@@ -101,46 +103,46 @@ def poll(rid):
         if st["done"] or st.get("error"):
             return {"status": "done" if st["done"] else "error",
                     "data": st.get("data"), "error": st.get("error")}
-        payload_str = st["payload"]
-        run_id = st.get("run_id")
 
-    if not run_id:
-        run_id = find_run(payload_str)
-        if not run_id:
-            if time.time() - st["ts"] > 180:
-                with STATE_LOCK:
-                    st["error"] = "run nao apareceu (workflow no default branch?)"
-                return {"status": "error", "error": st["error"]}
-            return {"status": "waiting_run"}
-        with STATE_LOCK:
-            st["run_id"] = run_id
+    art_id, run_id = find_artifact(rid)
 
-    info = gh(f"/repos/{OWNER}/{REPO}/actions/runs/{run_id}")
-    status, conclusion = info.get("status"), info.get("conclusion")
-
-    if status == "completed":
-        if conclusion != "success":
+    if art_id:
+        try:
+            zb = get_artifact_zip_by_id(art_id)
+            data = parse_artifact(zb)
+        except Exception as e:
             with STATE_LOCK:
-                st["error"] = f"run {conclusion}"
+                st["error"] = f"artifact: {e}"
             return {"status": "error", "error": st["error"]}
-        zb = get_artifact_zip(run_id)
-        if not zb:
-            if time.time() - st["ts"] > 240:
-                with STATE_LOCK:
-                    st["error"] = "artifact nao encontrado"
-                return {"status": "error", "error": st["error"]}
-            return {"status": "waiting_artifact"}
-        data = parse_artifact(zb)
         with STATE_LOCK:
             st["done"] = True
             st["data"] = data
+            if run_id:
+                st["run_id"] = run_id
         return {"status": "done", "data": data}
 
-    if time.time() - st["ts"] > 300:
+    # artifact ainda nao existe = run rodando (ou nao comecou)
+    elapsed = time.time() - st["ts"]
+    if elapsed > 300:
         with STATE_LOCK:
-            st["error"] = "timeout (5min)"
+            st["error"] = "timeout (5min) - run nao publicou artifact"
         return {"status": "error", "error": st["error"]}
-    return {"status": "running", "run_status": status}
+
+    # distingue "dispatch nao pegou" de "rodando": apos 45s sem artifact,
+    # checa se existe algum run recente desse workflow pra dar feedback.
+    if elapsed > 45 and not st.get("saw_run"):
+        try:
+            j = gh(f"/repos/{OWNER}/{REPO}/actions/workflows/{WORKFLOW}/runs?per_page=1")
+            runs = j.get("workflow_runs", [])
+            if runs:
+                with STATE_LOCK:
+                    st["saw_run"] = True
+                    st["run_id"] = runs[0]["id"]
+        except Exception:
+            pass
+    with STATE_LOCK:
+        running = bool(st.get("run_id")) or st.get("saw_run")
+    return {"status": "running" if (st.get("saw_run") or elapsed > 45) else "dispatched"}
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):
