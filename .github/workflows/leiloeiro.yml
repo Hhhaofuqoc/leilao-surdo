@@ -36,14 +36,12 @@ jobs:
           echo "RID=$(python3 -c 'import json,os;print(json.loads(os.environ["PAYLOAD"])["rid"])')" >> "$GITHUB_ENV"
           echo "PROMPT:"; cat out/prompt.txt; echo
 
-      - name: Rodar agente leiloeiro-surdo (OpenCode)
-        env:
-          GH_MODELS_KEY: ${{ secrets.GH_MODELS_KEY }}
+      - name: Rodar agente leiloeiro-surdo (OpenCode free tier)
         run: |
           set +e
-          timeout 180 opencode run \
+          timeout 120 opencode run \
             --agent leiloeiro-surdo \
-            -m githubmodels/openai/gpt-4o-mini \
+            -m opencode/mimo-v2.6-flash-free \
             --pure \
             "$(cat out/prompt.txt)" > out/raw.txt 2> out/err.txt
           echo "exit=$?"
